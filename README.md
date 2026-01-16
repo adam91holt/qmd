@@ -1,12 +1,22 @@
 # QMD - Quick Markdown Search
 
-An on-device search engine for everything you need to remember. Index your markdown notes, meeting transcripts, documentation, and knowledge bases. Search with keywords or natural language. Ideal for your agentic flows.
+A search engine for everything you need to remember. Index your markdown notes, meeting transcripts, documentation, and knowledge bases. Search with keywords or natural language. Ideal for your agentic flows.
+
+**Embedding Providers:**
+- **Local** (default): Fully on-device using GGUF models via node-llama-cpp
+- **Voyage AI**: High-quality cloud embeddings + reranking
+- **OpenAI**: OpenAI or any compatible API (Azure, Ollama, etc.)
 
 ## Quick Start
 
 ```sh
 # Install globally
-bun install -g https://github.com/yourusername/qmd-voyage
+bun install -g qmd
+
+# (Optional) Use cloud embeddings instead of local models
+export QMD_PROVIDER=voyage && export VOYAGE_API_KEY=pa-xxxxx
+# or
+export QMD_PROVIDER=openai && export OPENAI_API_KEY=sk-xxxxx
 
 # Create collections for your notes, docs, and meeting transcripts
 qmd collection add ~/notes --name notes
@@ -96,6 +106,8 @@ Although the tool works perfectly fine when you just tell your agent to use it o
 ```
 
 ## Architecture
+
+The hybrid search pipeline (shown for local mode - remote providers skip query expansion):
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -495,8 +507,12 @@ Collection ──► Glob Pattern ──► Markdown Files ──► Parse Title
 Documents are chunked into 800-token pieces with 15% overlap:
 
 ```
-Document ──► Chunk (800 tokens) ──► Format each chunk ──► node-llama-cpp ──► Store Vectors
-                │                    "title | text"        embedBatch()
+Document ──► Chunk (800 tokens) ──► Format chunk ──► Embedding Provider ──► Store Vectors
+                │                                          │
+                │                            ┌─────────────┼─────────────┐
+                │                            ▼             ▼             ▼
+                │                         Local       Voyage AI      OpenAI
+                │                     (node-llama)   (API call)    (API call)
                 │
                 └─► Chunks stored with:
                     - hash: document hash
@@ -544,6 +560,8 @@ Query ──► LLM Expansion ──► [Original, Variant 1, Variant 2]
 
 ## Model Configuration
 
+### Local Mode (default)
+
 Models are configured in `src/llm.ts` as HuggingFace URIs:
 
 ```typescript
@@ -552,23 +570,30 @@ const DEFAULT_RERANK_MODEL = "hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-re
 const DEFAULT_GENERATE_MODEL = "hf:ggml-org/Qwen3-0.6B-GGUF/Qwen3-0.6B-Q8_0.gguf";
 ```
 
-### EmbeddingGemma Prompt Format
-
+**EmbeddingGemma Prompt Format:**
 ```
 // For queries
 "task: search result | query: {query}"
 
-// For documents
+// For documents  
 "title: {title} | text: {content}"
 ```
 
-### Qwen3-Reranker
+**Qwen3-Reranker:** Uses node-llama-cpp's `createRankingContext()` and `rankAndSort()` API for cross-encoder reranking.
 
-Uses node-llama-cpp's `createRankingContext()` and `rankAndSort()` API for cross-encoder reranking. Returns documents sorted by relevance score (0.0 - 1.0).
+**Qwen3 (Query Expansion):** Generates query variations via `LlamaChatSession`.
 
-### Qwen3 (Query Expansion)
+### Remote Providers
 
-Used for generating query variations via `LlamaChatSession`.
+Remote providers are configured via environment variables (see Environment Variables section).
+
+| Provider | Embeddings | Reranking | Query Expansion |
+|----------|------------|-----------|-----------------|
+| **Local** | embeddinggemma-300M | qwen3-reranker-0.6b | qwen3-0.6b |
+| **Voyage** | voyage-3-lite | rerank-2 | ❌ (uses original query) |
+| **OpenAI** | text-embedding-3-small | ❌ | ❌ (uses original query) |
+
+Voyage provides the best remote quality with native reranking support. OpenAI mode works with any compatible API endpoint.
 
 ## License
 
