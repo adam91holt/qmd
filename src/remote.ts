@@ -158,11 +158,26 @@ export class RemoteLLM implements LLM {
   // Core API methods
   // ==========================================================================
 
+  /**
+   * Check if a model name is valid for this provider
+   */
+  private isValidModel(model: string | undefined): boolean {
+    if (!model) return false;
+    if (this.provider === "voyage") {
+      return model.startsWith("voyage-") || model.startsWith("rerank-");
+    }
+    // OpenAI models typically contain "embedding" or start with "text-"
+    return model.includes("embedding") || model.startsWith("text-");
+  }
+
   async embed(text: string, options: EmbedOptions = {}): Promise<EmbeddingResult | null> {
     try {
+      // Only use passed model if it's valid for this provider, otherwise use default
+      const model = this.isValidModel(options.model) ? options.model! : this.embedModel;
+      
       const body: EmbedRequest = {
         input: [text],
-        model: options.model || this.embedModel,
+        model,
       };
 
       // Add input_type for Voyage
@@ -198,6 +213,9 @@ export class RemoteLLM implements LLM {
     // Voyage supports 128 per batch, OpenAI supports 2048
     const BATCH_SIZE = this.provider === "voyage" ? 128 : 2048;
     const results: (EmbeddingResult | null)[] = [];
+    
+    // Only use passed model if it's valid for this provider
+    const model = this.isValidModel(options.model) ? options.model! : this.embedModel;
 
     for (let i = 0; i < texts.length; i += BATCH_SIZE) {
       const batch = texts.slice(i, i + BATCH_SIZE);
@@ -205,7 +223,7 @@ export class RemoteLLM implements LLM {
       try {
         const body: EmbedRequest = {
           input: batch,
-          model: options.model || this.embedModel,
+          model,
         };
 
         if (this.provider === "voyage") {
