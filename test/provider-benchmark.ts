@@ -6,10 +6,8 @@
  */
 
 import { execSync } from "child_process";
-import { mkdirSync, existsSync, rmSync } from "fs";
+import { existsSync, rmSync } from "fs";
 import { join } from "path";
-
-const BENCHMARK_INDEX = join(process.env.HOME || "/tmp", ".cache/qmd/benchmark.sqlite");
 
 // Test queries with expected documents
 const evalQueries = [
@@ -29,15 +27,22 @@ interface SearchResult {
   score: number;
 }
 
-function runVsearch(query: string, provider: string, indexPath: string): SearchResult[] {
-  const env = provider === "voyage" 
-    ? `VOYAGE_API_KEY="${process.env.VOYAGE_API_KEY}" QMD_PROVIDER=voyage`
-    : "QMD_PROVIDER=local";
-  
+const QMD_DIR = "/Users/adam/projects/qmd";
+
+function runCmd(cmd: string, env: Record<string, string> = {}): string {
+  const envStr = Object.entries(env).map(([k, v]) => `${k}="${v}"`).join(" ");
+  return execSync(`cd ${QMD_DIR} && ${envStr} ${cmd}`, { 
+    encoding: "utf-8", 
+    timeout: 120000,
+    env: { ...process.env, ...env }
+  });
+}
+
+function runVsearch(query: string, env: Record<string, string>): SearchResult[] {
   try {
-    const output = execSync(
-      `cd /Users/adam/projects/qmd && ${env} bun src/qmd.ts --index ${indexPath} vsearch "${query.replace(/"/g, '\\"')}" --json -n 5 2>/dev/null`,
-      { encoding: "utf-8", timeout: 60000 }
+    const output = runCmd(
+      `bun src/qmd.ts vsearch "${query.replace(/"/g, '\\"')}" --json -n 5 2>/dev/null`,
+      env
     );
     return JSON.parse(output);
   } catch (e) {
@@ -45,36 +50,40 @@ function runVsearch(query: string, provider: string, indexPath: string): SearchR
   }
 }
 
-function setupIndex(provider: string): string {
-  const indexName = `benchmark-${provider}`;
-  const indexPath = join(process.env.HOME || "/tmp", ".cache/qmd", `${indexName}.sqlite`);
-  
+function setupProvider(provider: string, indexPath: string): Record<string, string> {
   // Clean up old index
   if (existsSync(indexPath)) {
     rmSync(indexPath);
   }
   
-  const env = provider === "voyage"
-    ? `VOYAGE_API_KEY="${process.env.VOYAGE_API_KEY}" QMD_PROVIDER=voyage`
-    : "QMD_PROVIDER=local";
+  const env: Record<string, string> = {
+    XDG_CACHE_HOME: "/tmp/qmd-benchmark-" + provider,
+  };
   
-  console.log(`\nSetting up ${provider} index...`);
+  if (provider === "voyage") {
+    env.QMD_PROVIDER = "voyage";
+    env.VOYAGE_API_KEY = process.env.VOYAGE_API_KEY || "";
+  } else {
+    env.QMD_PROVIDER = "local";
+  }
   
-  // Create collection and embed
-  execSync(
-    `cd /Users/adam/projects/qmd && ${env} bun src/qmd.ts --index ${indexName} collection add test/eval-docs --name eval-docs`,
-    { encoding: "utf-8", stdio: "inherit" }
-  );
+  console.log(`\nSetting up ${provider} index at ${env.XDG_CACHE_HOME}...`);
   
-  execSync(
-    `cd /Users/adam/projects/qmd && ${env} bun src/qmd.ts --index ${indexName} embed`,
-    { encoding: "utf-8", stdio: "inherit" }
-  );
+  // Create collection
+  try {
+    runCmd(`bun src/qmd.ts collection add test/eval-docs --name eval-docs 2>&1`, env);
+  } catch (e) {
+    // Collection might already exist
+  }
   
-  return indexName;
+  // Embed
+  console.log(`Embedding with ${provider}...`);
+  runCmd(`bun src/qmd.ts embed 2>&1`, env);
+  
+  return env;
 }
 
-function evaluateProvider(provider: string, indexName: string): { hit1: number; hit3: number; total: number; latencyMs: number } {
+function evaluateProvider(provider: string, env: Record<string, string>): { hit1: number; hit3: number; total: number; latencyMs: number } {
   let hit1 = 0, hit3 = 0;
   let totalLatency = 0;
   
@@ -82,7 +91,7 @@ function evaluateProvider(provider: string, indexName: string): { hit1: number; 
   
   for (const { query, expectedDoc, difficulty } of evalQueries) {
     const start = Date.now();
-    const results = runVsearch(query, provider, indexName);
+    const results = runVsearch(query, env);
     totalLatency += Date.now() - start;
     
     const ranks = results
@@ -113,13 +122,13 @@ async function main() {
     process.exit(1);
   }
   
-  // Setup indexes
-  const localIndex = setupIndex("local");
-  const voyageIndex = setupIndex("voyage");
+  // Setup and evaluate Voyage first (faster)
+  const voyageEnv = setupProvider("voyage", "/tmp/qmd-benchmark-voyage");
+  const voyageResults = evaluateProvider("voyage", voyageEnv);
   
-  // Evaluate both
-  const localResults = evaluateProvider("local", localIndex);
-  const voyageResults = evaluateProvider("voyage", voyageIndex);
+  // Setup and evaluate Local
+  const localEnv = setupProvider("local", "/tmp/qmd-benchmark-local");
+  const localResults = evaluateProvider("local", localEnv);
   
   // Summary
   console.log("\n" + "=".repeat(60));
@@ -132,9 +141,14 @@ Local         ${((localResults.hit1/localResults.total)*100).toFixed(0).padStart
 Voyage        ${((voyageResults.hit1/voyageResults.total)*100).toFixed(0).padStart(3)}%      ${((voyageResults.hit3/voyageResults.total)*100).toFixed(0).padStart(3)}%      ${(voyageResults.latencyMs/voyageResults.total).toFixed(0)}ms
 `);
   
-  const winner = voyageResults.hit1 > localResults.hit1 ? "Voyage" : 
-                 localResults.hit1 > voyageResults.hit1 ? "Local" : "Tie";
+  const winner = voyageResults.hit1 > localResults.hit1 ? "🚀 Voyage" : 
+                 localResults.hit1 > voyageResults.hit1 ? "🏠 Local" : "🤝 Tie";
   console.log(`Winner (by Hit@1): ${winner}`);
+  
+  // Cleanup
+  console.log("\nCleaning up temp indexes...");
+  rmSync("/tmp/qmd-benchmark-voyage", { recursive: true, force: true });
+  rmSync("/tmp/qmd-benchmark-local", { recursive: true, force: true });
 }
 
 main().catch(console.error);
