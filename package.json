@@ -1,7 +1,7 @@
 {
-  "name": "qmd-voyage",
+  "name": "qmd",
   "version": "1.0.0",
-  "description": "Quick Markdown Search with Voyage AI - Full-text and vector search for markdown files",
+  "description": "Quick Markdown Search - Full-text and vector search for markdown files",
   "type": "module",
   "bin": {
     "qmd": "./qmd"

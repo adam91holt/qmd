@@ -24,9 +24,9 @@ import {
   type RerankDocument,
 } from "./llm.js";
 import {
-  VoyageLLM,
-  getDefaultVoyage,
-} from "./voyage.js";
+  RemoteLLM,
+  getDefaultRemote,
+} from "./remote.js";
 import {
   findContextForPath as collectionsFindContextForPath,
   addContext as collectionsAddContext,
@@ -270,14 +270,15 @@ export function toVirtualPath(db: Database, absolutePath: string): string | null
 /**
  * Get the appropriate LLM provider based on QMD_PROVIDER env var.
  * Defaults to 'local' (LlamaCpp) if not set.
- * Supported values: 'local' | 'voyage'
+ * Supported values: 'local' | 'voyage' | 'openai'
  */
 function getDefaultLLM(): LLM {
   const provider = Bun.env.QMD_PROVIDER?.toLowerCase() || 'local';
   
   switch (provider) {
     case 'voyage':
-      return getDefaultVoyage();
+    case 'openai':
+      return getDefaultRemote();
     case 'local':
     default:
       return getDefaultLlamaCpp();

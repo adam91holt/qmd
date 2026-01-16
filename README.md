@@ -1,47 +1,6 @@
-# QMD-Voyage - Quick Markdown Search with Voyage AI
+# QMD - Quick Markdown Search
 
 An on-device search engine for everything you need to remember. Index your markdown notes, meeting transcripts, documentation, and knowledge bases. Search with keywords or natural language. Ideal for your agentic flows.
-
-QMD-Voyage is a fork of QMD that supports **two provider modes**:
-
-- **Local mode** (default): Uses node-llama-cpp with GGUF models for fully on-device operation
-- **Voyage AI mode**: Uses Voyage AI's cloud API for embeddings and reranking with higher quality results
-
-Simply set `QMD_PROVIDER=voyage` to switch between providers.
-
-## Provider Configuration
-
-QMD-Voyage supports two provider modes:
-
-### Local Mode (Default)
-
-Uses node-llama-cpp with GGUF models for fully on-device operation:
-
-```sh
-# Use local provider (default - no env var needed)
-qmd search "API design"
-
-# Or explicitly set:
-export QMD_PROVIDER=local
-qmd search "API design"
-```
-
-### Voyage AI Mode
-
-Uses Voyage AI's cloud API for higher quality embeddings and reranking:
-
-```sh
-# Set your Voyage API key and provider
-export VOYAGE_API_KEY=pa-xxxxx
-export QMD_PROVIDER=voyage
-
-# Now all operations use Voyage AI
-qmd embed                    # Uses voyage-3-lite for embeddings
-qmd vsearch "authentication" # Vector search with Voyage embeddings
-qmd query "login flow"       # Reranking with rerank-2 model
-```
-
-**Note:** Query expansion (`qmd query`) is simplified in Voyage mode since Voyage doesn't provide text generation. The hybrid search still works but without LLM-generated query variations.
 
 ## Quick Start
 
@@ -246,7 +205,7 @@ The `query` command uses **Reciprocal Rank Fusion (RRF)** with position-aware bl
 
 ### Provider-Specific Requirements
 
-#### Local Mode (node-llama-cpp)
+#### Local Mode (default)
 
 When using `QMD_PROVIDER=local` (default), three GGUF models are auto-downloaded on first use:
 
@@ -258,18 +217,13 @@ When using `QMD_PROVIDER=local` (default), three GGUF models are auto-downloaded
 
 Models are downloaded from HuggingFace and cached in `~/.cache/qmd/models/`.
 
-#### Voyage AI Mode
+#### Remote Providers (Voyage / OpenAI)
 
-When using `QMD_PROVIDER=voyage`, you need:
+When using `QMD_PROVIDER=voyage` or `QMD_PROVIDER=openai`:
 
-1. **Voyage API Key**: Sign up at [voyageai.com](https://www.voyageai.com) and get your API key
-2. **Set environment variable**: `export VOYAGE_API_KEY=pa-xxxxx`
-
-Voyage AI models used:
-- **voyage-3-lite**: Fast embeddings (1536 dimensions)
-- **rerank-2**: High-quality reranking
-
-No local model downloads required in Voyage mode.
+- No local model downloads required
+- Requires API key in environment (`VOYAGE_API_KEY` or `OPENAI_API_KEY`)
+- Voyage supports native reranking; OpenAI does not
 
 ## Installation
 
@@ -491,11 +445,33 @@ llm_cache       -- Cached LLM responses (query expansion, rerank scores)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `QMD_PROVIDER` | `local` | Provider mode: `local` or `voyage` |
+| `QMD_PROVIDER` | `local` | Provider: `local`, `voyage`, or `openai` |
 | `VOYAGE_API_KEY` | - | Voyage AI API key (required for `voyage` mode) |
 | `VOYAGE_EMBED_MODEL` | `voyage-3-lite` | Voyage embedding model |
 | `VOYAGE_RERANK_MODEL` | `rerank-2` | Voyage reranking model |
+| `OPENAI_API_KEY` | - | OpenAI API key (required for `openai` mode) |
+| `OPENAI_API_BASE` | `https://api.openai.com/v1` | OpenAI-compatible base URL |
+| `OPENAI_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model |
 | `XDG_CACHE_HOME` | `~/.cache` | Cache directory location |
+
+### Remote Providers
+
+Set `QMD_PROVIDER` to use cloud APIs instead of local models:
+
+```sh
+# Voyage AI (best quality embeddings + reranking)
+export QMD_PROVIDER=voyage
+export VOYAGE_API_KEY=pa-xxxxx
+
+# OpenAI or any OpenAI-compatible API
+export QMD_PROVIDER=openai  
+export OPENAI_API_KEY=sk-xxxxx
+
+# Custom OpenAI-compatible endpoint (Ollama, Azure, etc.)
+export OPENAI_API_BASE=http://localhost:11434/v1
+```
+
+**Note:** Remote providers don't support query expansion (no text generation). Hybrid search still works but uses the original query only.
 
 ## How It Works
 

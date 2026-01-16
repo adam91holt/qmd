@@ -1,8 +1,12 @@
 /**
- * voyage.ts - Voyage AI embedding provider for QMD
+ * remote.ts - Remote embedding providers for QMD
  *
- * Implements the LLM interface using Voyage AI's API for embeddings and reranking.
- * Requires VOYAGE_API_KEY environment variable.
+ * Supports:
+ * - Voyage AI (voyage-3-lite, rerank-2)
+ * - OpenAI-compatible APIs (OpenAI, Azure, Ollama, etc.)
+ *
+ * Set QMD_PROVIDER to "voyage" or "openai" to use remote embeddings.
+ * Requires appropriate API key in environment.
  */
 
 import type {
@@ -23,26 +27,27 @@ import type {
 // Configuration
 // =============================================================================
 
+// Voyage AI defaults
 const VOYAGE_API_BASE = "https://api.voyageai.com/v1";
+const VOYAGE_EMBED_MODEL = "voyage-3-lite";
+const VOYAGE_RERANK_MODEL = "rerank-2";
 
-// Default models - voyage-4 series is latest
-const DEFAULT_EMBED_MODEL = "voyage-3-lite";
-const DEFAULT_RERANK_MODEL = "rerank-2";
+// OpenAI defaults
+const OPENAI_API_BASE = "https://api.openai.com/v1";
+const OPENAI_EMBED_MODEL = "text-embedding-3-small";
 
 // =============================================================================
 // Types
 // =============================================================================
 
-interface VoyageEmbedRequest {
-  input: string[];
+interface EmbedRequest {
+  input: string | string[];
   model: string;
-  input_type?: "query" | "document";
-  truncation?: boolean;
-  output_dimension?: number;
-  output_dtype?: "float" | "int8" | "uint8" | "binary" | "ubinary";
+  input_type?: "query" | "document"; // Voyage-specific
+  dimensions?: number; // OpenAI-specific
 }
 
-interface VoyageEmbedResponse {
+interface EmbedResponse {
   object: "list";
   data: Array<{
     object: "embedding";
@@ -51,24 +56,23 @@ interface VoyageEmbedResponse {
   }>;
   model: string;
   usage: {
+    prompt_tokens?: number;
     total_tokens: number;
   };
 }
 
-interface VoyageRerankRequest {
+interface RerankRequest {
   query: string;
   documents: string[];
   model: string;
   top_k?: number;
-  truncation?: boolean;
 }
 
-interface VoyageRerankResponse {
+interface RerankResponse {
   object: "list";
   data: Array<{
     index: number;
     relevance_score: number;
-    document?: string;
   }>;
   model: string;
   usage: {
@@ -77,39 +81,60 @@ interface VoyageRerankResponse {
 }
 
 // =============================================================================
-// Voyage LLM Implementation
+// Remote LLM Implementation
 // =============================================================================
 
-export type VoyageConfig = {
+export type RemoteProvider = "voyage" | "openai";
+
+export type RemoteConfig = {
+  provider?: RemoteProvider;
   apiKey?: string;
+  baseUrl?: string;
   embedModel?: string;
   rerankModel?: string;
-  baseUrl?: string;
 };
 
 /**
- * LLM implementation using Voyage AI's API
+ * LLM implementation using remote embedding APIs (Voyage, OpenAI-compatible)
  */
-export class VoyageLLM implements LLM {
+export class RemoteLLM implements LLM {
+  private provider: RemoteProvider;
   private apiKey: string;
+  private baseUrl: string;
   private embedModel: string;
   private rerankModel: string;
-  private baseUrl: string;
 
-  constructor(config: VoyageConfig = {}) {
-    this.apiKey = config.apiKey || process.env.VOYAGE_API_KEY || "";
-    if (!this.apiKey) {
-      throw new Error(
-        "Voyage API key required. Set VOYAGE_API_KEY environment variable or pass apiKey in config."
-      );
+  constructor(config: RemoteConfig = {}) {
+    // Detect provider from env or config
+    this.provider = config.provider || 
+      (process.env.QMD_PROVIDER as RemoteProvider) || 
+      "voyage";
+
+    // Get API key based on provider
+    if (this.provider === "voyage") {
+      this.apiKey = config.apiKey || process.env.VOYAGE_API_KEY || "";
+      this.baseUrl = config.baseUrl || process.env.VOYAGE_API_BASE || VOYAGE_API_BASE;
+      this.embedModel = config.embedModel || process.env.VOYAGE_EMBED_MODEL || VOYAGE_EMBED_MODEL;
+      this.rerankModel = config.rerankModel || process.env.VOYAGE_RERANK_MODEL || VOYAGE_RERANK_MODEL;
+      
+      if (!this.apiKey) {
+        throw new Error("Voyage API key required. Set VOYAGE_API_KEY environment variable.");
+      }
+    } else {
+      // OpenAI or OpenAI-compatible
+      this.apiKey = config.apiKey || process.env.OPENAI_API_KEY || "";
+      this.baseUrl = config.baseUrl || process.env.OPENAI_API_BASE || OPENAI_API_BASE;
+      this.embedModel = config.embedModel || process.env.OPENAI_EMBED_MODEL || OPENAI_EMBED_MODEL;
+      this.rerankModel = ""; // OpenAI doesn't have native reranking
+      
+      if (!this.apiKey) {
+        throw new Error("OpenAI API key required. Set OPENAI_API_KEY environment variable.");
+      }
     }
-    this.embedModel = config.embedModel || process.env.VOYAGE_EMBED_MODEL || DEFAULT_EMBED_MODEL;
-    this.rerankModel = config.rerankModel || process.env.VOYAGE_RERANK_MODEL || DEFAULT_RERANK_MODEL;
-    this.baseUrl = config.baseUrl || VOYAGE_API_BASE;
   }
 
   /**
-   * Make a request to Voyage API
+   * Make a request to the API
    */
   private async request<T>(endpoint: string, body: object): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -123,7 +148,7 @@ export class VoyageLLM implements LLM {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Voyage API error (${response.status}): ${error}`);
+      throw new Error(`API error (${response.status}): ${error}`);
     }
 
     return response.json() as Promise<T>;
@@ -135,13 +160,17 @@ export class VoyageLLM implements LLM {
 
   async embed(text: string, options: EmbedOptions = {}): Promise<EmbeddingResult | null> {
     try {
-      const inputType = options.isQuery ? "query" : "document";
-
-      const response = await this.request<VoyageEmbedResponse>("/embeddings", {
+      const body: EmbedRequest = {
         input: [text],
         model: options.model || this.embedModel,
-        input_type: inputType,
-      } satisfies VoyageEmbedRequest);
+      };
+
+      // Add input_type for Voyage
+      if (this.provider === "voyage") {
+        body.input_type = options.isQuery ? "query" : "document";
+      }
+
+      const response = await this.request<EmbedResponse>("/embeddings", body);
 
       if (!response.data || response.data.length === 0) {
         return null;
@@ -152,14 +181,13 @@ export class VoyageLLM implements LLM {
         model: response.model,
       };
     } catch (error) {
-      console.error("Voyage embedding error:", error);
+      console.error(`${this.provider} embedding error:`, error);
       return null;
     }
   }
 
   /**
    * Batch embed multiple texts efficiently
-   * Voyage supports up to 128 texts per request
    */
   async embedBatch(
     texts: string[],
@@ -167,20 +195,24 @@ export class VoyageLLM implements LLM {
   ): Promise<(EmbeddingResult | null)[]> {
     if (texts.length === 0) return [];
 
-    const BATCH_SIZE = 128;
+    // Voyage supports 128 per batch, OpenAI supports 2048
+    const BATCH_SIZE = this.provider === "voyage" ? 128 : 2048;
     const results: (EmbeddingResult | null)[] = [];
-    const inputType = options.isQuery ? "query" : "document";
 
-    // Process in batches
     for (let i = 0; i < texts.length; i += BATCH_SIZE) {
       const batch = texts.slice(i, i + BATCH_SIZE);
 
       try {
-        const response = await this.request<VoyageEmbedResponse>("/embeddings", {
+        const body: EmbedRequest = {
           input: batch,
           model: options.model || this.embedModel,
-          input_type: inputType,
-        } satisfies VoyageEmbedRequest);
+        };
+
+        if (this.provider === "voyage") {
+          body.input_type = options.isQuery ? "query" : "document";
+        }
+
+        const response = await this.request<EmbedResponse>("/embeddings", body);
 
         // Map results back by index
         const batchResults: (EmbeddingResult | null)[] = new Array(batch.length).fill(null);
@@ -192,8 +224,7 @@ export class VoyageLLM implements LLM {
         }
         results.push(...batchResults);
       } catch (error) {
-        console.error("Voyage batch embedding error:", error);
-        // Fill with nulls for failed batch
+        console.error(`${this.provider} batch embedding error:`, error);
         results.push(...new Array(batch.length).fill(null));
       }
     }
@@ -202,21 +233,17 @@ export class VoyageLLM implements LLM {
   }
 
   /**
-   * Text generation - not supported by Voyage
-   * Falls back to simple query expansion without LLM
+   * Text generation - not supported by embedding APIs
    */
   async generate(
     prompt: string,
     options: GenerateOptions = {}
   ): Promise<GenerateResult | null> {
-    // Voyage doesn't do text generation
-    // Return null to signal caller should handle differently
-    console.warn("Voyage does not support text generation. Use a different provider for expandQuery.");
+    console.warn(`${this.provider} provider does not support text generation.`);
     return null;
   }
 
   async modelExists(model: string): Promise<ModelInfo> {
-    // Voyage models are always "available" if API key works
     return {
       name: model,
       exists: true,
@@ -225,7 +252,6 @@ export class VoyageLLM implements LLM {
 
   /**
    * Expand query - simplified version without LLM generation
-   * Returns the original query for vector search
    */
   async expandQuery(
     query: string,
@@ -243,7 +269,7 @@ export class VoyageLLM implements LLM {
   }
 
   /**
-   * Rerank documents using Voyage's reranker
+   * Rerank documents - only Voyage supports this natively
    */
   async rerank(
     query: string,
@@ -254,14 +280,27 @@ export class VoyageLLM implements LLM {
       return { results: [], model: this.rerankModel };
     }
 
+    // Only Voyage has native reranking
+    if (this.provider !== "voyage") {
+      console.warn("Reranking not supported by OpenAI provider, returning original order.");
+      return {
+        results: documents.map((d, i) => ({
+          file: d.file,
+          score: 1 - (i * 0.01), // Fake descending scores
+          index: i,
+        })),
+        model: "none",
+      };
+    }
+
     try {
       const docTexts = documents.map((d) => d.text);
 
-      const response = await this.request<VoyageRerankResponse>("/rerank", {
+      const response = await this.request<RerankResponse>("/rerank", {
         query,
         documents: docTexts,
         model: options.model || this.rerankModel,
-      } satisfies VoyageRerankRequest);
+      } satisfies RerankRequest);
 
       const results: RerankDocumentResult[] = response.data.map((item) => ({
         file: documents[item.index].file,
@@ -269,7 +308,6 @@ export class VoyageLLM implements LLM {
         index: item.index,
       }));
 
-      // Sort by score descending
       results.sort((a, b) => b.score - a.score);
 
       return {
@@ -278,7 +316,6 @@ export class VoyageLLM implements LLM {
       };
     } catch (error) {
       console.error("Voyage rerank error:", error);
-      // Return original order with zero scores on error
       return {
         results: documents.map((d, i) => ({
           file: d.file,
@@ -294,7 +331,7 @@ export class VoyageLLM implements LLM {
    * Dispose - no-op for API-based provider
    */
   async dispose(): Promise<void> {
-    // Nothing to dispose for HTTP-based provider
+    // Nothing to dispose
   }
 }
 
@@ -302,31 +339,31 @@ export class VoyageLLM implements LLM {
 // Singleton
 // =============================================================================
 
-let defaultVoyage: VoyageLLM | null = null;
+let defaultRemote: RemoteLLM | null = null;
 
 /**
- * Get the default Voyage instance (creates one if needed)
+ * Get the default Remote instance
  */
-export function getDefaultVoyage(): VoyageLLM {
-  if (!defaultVoyage) {
-    defaultVoyage = new VoyageLLM();
+export function getDefaultRemote(): RemoteLLM {
+  if (!defaultRemote) {
+    defaultRemote = new RemoteLLM();
   }
-  return defaultVoyage;
+  return defaultRemote;
 }
 
 /**
- * Set a custom default Voyage instance
+ * Set a custom default Remote instance
  */
-export function setDefaultVoyage(llm: VoyageLLM | null): void {
-  defaultVoyage = llm;
+export function setDefaultRemote(llm: RemoteLLM | null): void {
+  defaultRemote = llm;
 }
 
 /**
- * Dispose the default Voyage instance
+ * Dispose the default Remote instance
  */
-export async function disposeDefaultVoyage(): Promise<void> {
-  if (defaultVoyage) {
-    await defaultVoyage.dispose();
-    defaultVoyage = null;
+export async function disposeDefaultRemote(): Promise<void> {
+  if (defaultRemote) {
+    await defaultRemote.dispose();
+    defaultRemote = null;
   }
 }
