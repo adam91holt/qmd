@@ -27,9 +27,9 @@ import type {
 // Configuration
 // =============================================================================
 
-// Voyage AI defaults
+// Voyage AI defaults (voyage-4 series released Jan 2026)
 const VOYAGE_API_BASE = "https://api.voyageai.com/v1";
-const VOYAGE_EMBED_MODEL = "voyage-3-lite";
+const VOYAGE_EMBED_MODEL = "voyage-4-lite";
 const VOYAGE_RERANK_MODEL = "rerank-2";
 
 // OpenAI defaults

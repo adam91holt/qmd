@@ -459,7 +459,7 @@ llm_cache       -- Cached LLM responses (query expansion, rerank scores)
 |----------|---------|-------------|
 | `QMD_PROVIDER` | `local` | Provider: `local`, `voyage`, or `openai` |
 | `VOYAGE_API_KEY` | - | Voyage AI API key (required for `voyage` mode) |
-| `VOYAGE_EMBED_MODEL` | `voyage-3-lite` | Voyage embedding model |
+| `VOYAGE_EMBED_MODEL` | `voyage-4-lite` | Voyage embedding model |
 | `VOYAGE_RERANK_MODEL` | `rerank-2` | Voyage reranking model |
 | `OPENAI_API_KEY` | - | OpenAI API key (required for `openai` mode) |
 | `OPENAI_API_BASE` | `https://api.openai.com/v1` | OpenAI-compatible base URL |
@@ -590,7 +590,7 @@ Remote providers are configured via environment variables (see Environment Varia
 | Provider | Embeddings | Reranking | Query Expansion |
 |----------|------------|-----------|-----------------|
 | **Local** | embeddinggemma-300M | qwen3-reranker-0.6b | qwen3-0.6b |
-| **Voyage** | voyage-3-lite | rerank-2 | ❌ (uses original query) |
+| **Voyage** | voyage-4-lite | rerank-2 | ❌ (uses original query) |
 | **OpenAI** | text-embedding-3-small | ❌ | ❌ (uses original query) |
 
 Voyage provides the best remote quality with native reranking support. OpenAI mode works with any compatible API endpoint.
