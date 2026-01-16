@@ -272,7 +272,7 @@ export function toVirtualPath(db: Database, absolutePath: string): string | null
  * Defaults to 'local' (LlamaCpp) if not set.
  * Supported values: 'local' | 'voyage' | 'openai'
  */
-function getDefaultLLM(): LLM {
+export function getDefaultLLM(): LLM {
   const provider = Bun.env.QMD_PROVIDER?.toLowerCase() || 'local';
   
   switch (provider) {

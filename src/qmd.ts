@@ -62,6 +62,7 @@ import {
   DEFAULT_MULTI_GET_MAX_BYTES,
   createStore,
   getDefaultDbPath,
+  getDefaultLLM,
 } from "./store.js";
 import { getDefaultLlamaCpp, disposeDefaultLlamaCpp, type RerankDocument, type Queryable, type QueryType } from "./llm.js";
 import type { SearchResult, RankedResult } from "./store.js";
@@ -236,7 +237,7 @@ async function rerank(query: string, documents: { file: string; text: string }[]
   process.stderr.write(`Reranking ${total} documents...\n`);
   progress.indeterminate();
 
-  const llm = getDefaultLlamaCpp();
+  const llm = getDefaultLLM();
   const rerankDocs: RerankDocument[] = documents.map((doc) => ({
     file: doc.file,
     text: doc.text.slice(0, 4000), // Truncate to context limit
@@ -1536,7 +1537,7 @@ async function vectorIndex(model: string = DEFAULT_EMBED_MODEL, force: boolean =
 
   // Get embedding dimensions from first chunk
   progress.indeterminate();
-  const llm = getDefaultLlamaCpp();
+  const llm = getDefaultLLM();
   const firstChunk = allChunks[0];
   if (!firstChunk) {
     throw new Error("No chunks available to embed");
@@ -2002,7 +2003,7 @@ async function vectorSearch(query: string, opts: OutputOptions, model: string = 
 async function expandQueryStructured(query: string, includeLexical: boolean = true, context?: string): Promise<Queryable[]> {
   process.stderr.write(`${c.dim}Expanding query...${c.reset}\n`);
 
-  const llm = getDefaultLlamaCpp();
+  const llm = getDefaultLLM();
   const queryables = await llm.expandQuery(query, { includeLexical, context });
 
   // Log the expansion as a tree
