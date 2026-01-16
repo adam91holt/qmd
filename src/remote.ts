@@ -127,7 +127,8 @@ export class RemoteLLM implements LLM {
       this.embedModel = config.embedModel || process.env.OPENAI_EMBED_MODEL || OPENAI_EMBED_MODEL;
       this.rerankModel = ""; // OpenAI doesn't have native reranking
       
-      if (!this.apiKey) {
+      // Only require API key if using default OpenAI endpoint
+      if (!this.apiKey && this.baseUrl === OPENAI_API_BASE) {
         throw new Error("OpenAI API key required. Set OPENAI_API_KEY environment variable.");
       }
     }
@@ -137,12 +138,16 @@ export class RemoteLLM implements LLM {
    * Make a request to the API
    */
   private async request<T>(endpoint: string, body: object): Promise<T> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.apiKey) {
+      headers.Authorization = `Bearer ${this.apiKey}`;
+    }
+    
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
+      headers,
       body: JSON.stringify(body),
     });
 

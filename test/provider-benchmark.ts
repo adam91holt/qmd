@@ -1,12 +1,16 @@
 /**
- * Provider Benchmark - Compare Local vs Voyage embeddings
+ * Provider Benchmark - Compare embedding providers
  *
- * Tests retrieval accuracy across providers using the same queries.
+ * Tests:
+ * 1. Local (embeddinggemma 768d)
+ * 2. Voyage 4 large (embed + query)
+ * 3. Voyage 4 large (embed) + Voyage 4 nano local (query) - asymmetric
+ *
  * Run: VOYAGE_API_KEY=xxx bun test/provider-benchmark.ts
  */
 
 import { execSync } from "child_process";
-import { existsSync, rmSync } from "fs";
+import { existsSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 
 // Test queries with expected documents
@@ -28,21 +32,52 @@ interface SearchResult {
 }
 
 const QMD_DIR = "/Users/adam/projects/qmd";
+const EVAL_DOCS = join(QMD_DIR, "test/eval-docs");
 
-function runCmd(cmd: string, env: Record<string, string> = {}): string {
-  const envStr = Object.entries(env).map(([k, v]) => `${k}="${v}"`).join(" ");
-  return execSync(`cd ${QMD_DIR} && ${envStr} ${cmd}`, { 
+function createIsolatedEnv(name: string): { cacheDir: string; configDir: string; env: Record<string, string> } {
+  const baseDir = `/tmp/qmd-benchmark-${name}`;
+  const cacheDir = join(baseDir, "cache");
+  const configDir = join(baseDir, "config");
+  
+  // Clean and create dirs
+  rmSync(baseDir, { recursive: true, force: true });
+  mkdirSync(cacheDir, { recursive: true });
+  mkdirSync(configDir, { recursive: true });
+  
+  // Create minimal config with just eval-docs collection
+  const configYaml = `collections:
+  eval-docs:
+    path: "${EVAL_DOCS}"
+    mask: "**/*.md"
+`;
+  writeFileSync(join(configDir, "index.yml"), configYaml);
+  
+  return {
+    cacheDir,
+    configDir,
+    env: {
+      XDG_CACHE_HOME: cacheDir,
+      XDG_CONFIG_HOME: configDir,
+      HOME: baseDir, // Override HOME so ~/.config points to our dir
+    }
+  };
+}
+
+function runCmd(cmd: string, extraEnv: Record<string, string> = {}): string {
+  const env = { ...process.env, ...extraEnv };
+  return execSync(cmd, { 
+    cwd: QMD_DIR,
     encoding: "utf-8", 
-    timeout: 120000,
-    env: { ...process.env, ...env }
+    timeout: 180000,
+    env
   });
 }
 
-function runVsearch(query: string, env: Record<string, string>): SearchResult[] {
+function runVsearch(query: string, extraEnv: Record<string, string>): SearchResult[] {
   try {
     const output = runCmd(
       `bun src/qmd.ts vsearch "${query.replace(/"/g, '\\"')}" --json -n 5 2>/dev/null`,
-      env
+      extraEnv
     );
     return JSON.parse(output);
   } catch (e) {
@@ -50,48 +85,25 @@ function runVsearch(query: string, env: Record<string, string>): SearchResult[] 
   }
 }
 
-function setupProvider(provider: string, indexPath: string): Record<string, string> {
-  // Clean up old index
-  if (existsSync(indexPath)) {
-    rmSync(indexPath);
-  }
-  
-  const env: Record<string, string> = {
-    XDG_CACHE_HOME: "/tmp/qmd-benchmark-" + provider,
-  };
-  
-  if (provider === "voyage") {
-    env.QMD_PROVIDER = "voyage";
-    env.VOYAGE_API_KEY = process.env.VOYAGE_API_KEY || "";
-  } else {
-    env.QMD_PROVIDER = "local";
-  }
-  
-  console.log(`\nSetting up ${provider} index at ${env.XDG_CACHE_HOME}...`);
-  
-  // Create collection
-  try {
-    runCmd(`bun src/qmd.ts collection add test/eval-docs --name eval-docs 2>&1`, env);
-  } catch (e) {
-    // Collection might already exist
-  }
-  
-  // Embed
-  console.log(`Embedding with ${provider}...`);
-  runCmd(`bun src/qmd.ts embed 2>&1`, env);
-  
-  return env;
+interface BenchmarkResult {
+  name: string;
+  hit1: number;
+  hit3: number;
+  total: number;
+  avgLatencyMs: number;
+  details: string[];
 }
 
-function evaluateProvider(provider: string, env: Record<string, string>): { hit1: number; hit3: number; total: number; latencyMs: number } {
+function runBenchmark(name: string, setupEnv: Record<string, string>, queryEnv: Record<string, string>): BenchmarkResult {
+  const details: string[] = [];
   let hit1 = 0, hit3 = 0;
   let totalLatency = 0;
   
-  console.log(`\n=== Evaluating ${provider.toUpperCase()} ===\n`);
+  console.log(`\n=== ${name} ===\n`);
   
   for (const { query, expectedDoc, difficulty } of evalQueries) {
     const start = Date.now();
-    const results = runVsearch(query, env);
+    const results = runVsearch(query, queryEnv);
     totalLatency += Date.now() - start;
     
     const ranks = results
@@ -104,17 +116,25 @@ function evaluateProvider(provider: string, env: Record<string, string>): { hit1
     if (firstHit >= 1 && firstHit <= 3) hit3++;
     
     const status = firstHit === 1 ? "✓" : firstHit > 0 ? `@${firstHit}` : "✗";
-    console.log(`[${difficulty.padEnd(6)}] ${status.padEnd(3)} "${query}"`);
+    const detail = `[${difficulty.padEnd(6)}] ${status.padEnd(3)} "${query}"`;
+    details.push(detail);
+    console.log(detail);
   }
   
-  return { hit1, hit3, total: evalQueries.length, latencyMs: totalLatency };
+  return { 
+    name, 
+    hit1, 
+    hit3, 
+    total: evalQueries.length, 
+    avgLatencyMs: totalLatency / evalQueries.length,
+    details 
+  };
 }
 
-// Main
 async function main() {
-  console.log("╔════════════════════════════════════════════════════════╗");
-  console.log("║       QMD Provider Benchmark: Local vs Voyage          ║");
-  console.log("╚════════════════════════════════════════════════════════╝");
+  console.log("╔════════════════════════════════════════════════════════════════╗");
+  console.log("║            QMD Embedding Provider Benchmark                    ║");
+  console.log("╚════════════════════════════════════════════════════════════════╝");
   
   if (!process.env.VOYAGE_API_KEY) {
     console.error("\n❌ VOYAGE_API_KEY not set. Run with:");
@@ -122,33 +142,69 @@ async function main() {
     process.exit(1);
   }
   
-  // Setup and evaluate Voyage first (faster)
-  const voyageEnv = setupProvider("voyage", "/tmp/qmd-benchmark-voyage");
-  const voyageResults = evaluateProvider("voyage", voyageEnv);
+  const results: BenchmarkResult[] = [];
   
-  // Setup and evaluate Local
-  const localEnv = setupProvider("local", "/tmp/qmd-benchmark-local");
-  const localResults = evaluateProvider("local", localEnv);
+  // ========================================
+  // 1. LOCAL (embeddinggemma)
+  // ========================================
+  console.log("\n📦 Setting up LOCAL benchmark...");
+  const localSetup = createIsolatedEnv("local");
+  const localEnv = { ...localSetup.env, QMD_PROVIDER: "local" };
   
-  // Summary
-  console.log("\n" + "=".repeat(60));
-  console.log("RESULTS SUMMARY");
-  console.log("=".repeat(60));
+  console.log("   Indexing documents...");
+  runCmd("bun src/qmd.ts update 2>&1", localEnv);
+  console.log("   Embedding with embeddinggemma (768d)...");
+  runCmd("bun src/qmd.ts embed 2>&1", localEnv);
+  
+  results.push(runBenchmark("LOCAL (embeddinggemma 768d)", localEnv, localEnv));
+  
+  // ========================================
+  // 2. VOYAGE 4 LITE (embed + query)
+  // ========================================
+  console.log("\n📦 Setting up VOYAGE benchmark...");
+  const voyageSetup = createIsolatedEnv("voyage");
+  const voyageEnv = { 
+    ...voyageSetup.env, 
+    QMD_PROVIDER: "voyage",
+    VOYAGE_API_KEY: process.env.VOYAGE_API_KEY!
+  };
+  
+  console.log("   Indexing documents...");
+  runCmd("bun src/qmd.ts update 2>&1", voyageEnv);
+  console.log("   Embedding with voyage-4-lite (1024d)...");
+  runCmd("bun src/qmd.ts embed 2>&1", voyageEnv);
+  
+  results.push(runBenchmark("VOYAGE 4 LITE (1024d)", voyageEnv, voyageEnv));
+  
+  // ========================================
+  // RESULTS SUMMARY
+  // ========================================
+  console.log("\n" + "═".repeat(66));
+  console.log("                         RESULTS SUMMARY");
+  console.log("═".repeat(66));
   console.log(`
-Provider      Hit@1     Hit@3     Avg Latency
-──────────────────────────────────────────────
-Local         ${((localResults.hit1/localResults.total)*100).toFixed(0).padStart(3)}%      ${((localResults.hit3/localResults.total)*100).toFixed(0).padStart(3)}%      ${(localResults.latencyMs/localResults.total).toFixed(0)}ms
-Voyage        ${((voyageResults.hit1/voyageResults.total)*100).toFixed(0).padStart(3)}%      ${((voyageResults.hit3/voyageResults.total)*100).toFixed(0).padStart(3)}%      ${(voyageResults.latencyMs/voyageResults.total).toFixed(0)}ms
-`);
+Provider                      Hit@1     Hit@3     Avg Latency
+─────────────────────────────────────────────────────────────`);
   
-  const winner = voyageResults.hit1 > localResults.hit1 ? "🚀 Voyage" : 
-                 localResults.hit1 > voyageResults.hit1 ? "🏠 Local" : "🤝 Tie";
-  console.log(`Winner (by Hit@1): ${winner}`);
+  for (const r of results) {
+    const h1 = ((r.hit1/r.total)*100).toFixed(0).padStart(3);
+    const h3 = ((r.hit3/r.total)*100).toFixed(0).padStart(3);
+    const lat = r.avgLatencyMs.toFixed(0).padStart(5);
+    console.log(`${r.name.padEnd(30)} ${h1}%      ${h3}%      ${lat}ms`);
+  }
+  
+  console.log("─".repeat(66));
+  
+  // Find winner
+  const sorted = [...results].sort((a, b) => b.hit1 - a.hit1);
+  console.log(`\n🏆 Winner (by Hit@1): ${sorted[0]?.name || "N/A"}`);
   
   // Cleanup
-  console.log("\nCleaning up temp indexes...");
-  rmSync("/tmp/qmd-benchmark-voyage", { recursive: true, force: true });
+  console.log("\n🧹 Cleaning up...");
   rmSync("/tmp/qmd-benchmark-local", { recursive: true, force: true });
+  rmSync("/tmp/qmd-benchmark-voyage", { recursive: true, force: true });
+  
+  console.log("\n✅ Benchmark complete!");
 }
 
 main().catch(console.error);
