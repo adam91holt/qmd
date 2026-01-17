@@ -201,6 +201,16 @@ export interface LLM {
   getEmbedModel(): string;
 
   /**
+   * Get the name of the reranker model being used
+   */
+  getRerankModel(): string;
+
+  /**
+   * Get the provider name (e.g., "local", "voyage", "openai")
+   */
+  getProvider(): string;
+
+  /**
    * Dispose of resources
    */
   dispose(): Promise<void>;
@@ -763,6 +773,14 @@ Final Output:`;
 
   getEmbedModel(): string {
     return this.embedModelUri;
+  }
+
+  getRerankModel(): string {
+    return this.rerankModelUri;
+  }
+
+  getProvider(): string {
+    return "local";
   }
 
   async dispose(): Promise<void> {

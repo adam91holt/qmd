@@ -358,6 +358,20 @@ export class RemoteLLM implements LLM {
   }
 
   /**
+   * Get the name of the reranker model being used
+   */
+  getRerankModel(): string {
+    return this.rerankModel;
+  }
+
+  /**
+   * Get the provider name
+   */
+  getProvider(): string {
+    return this.provider;
+  }
+
+  /**
    * Dispose - no-op for API-based provider
    */
   async dispose(): Promise<void> {

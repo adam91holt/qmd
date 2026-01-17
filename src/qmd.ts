@@ -294,9 +294,17 @@ function showStatus(): void {
   // Most recent update across all collections
   const mostRecent = db.prepare(`SELECT MAX(modified_at) as latest FROM documents WHERE active = 1`).get() as { latest: string | null };
 
+  // Get provider info
+  const llm = getDefaultLLM();
+  const provider = llm.getProvider();
+  // Shorten model names for display (strip HuggingFace URI prefix)
+  const embedModel = llm.getEmbedModel().replace(/^hf:[^/]+\/[^/]+\//, "");
+  const rerankModel = llm.getRerankModel().replace(/^hf:[^/]+\/[^/]+\//, "");
+
   console.log(`${c.bold}QMD Status${c.reset}\n`);
-  console.log(`Index: ${dbPath}`);
-  console.log(`Size:  ${formatBytes(indexSize)}\n`);
+  console.log(`Index:    ${dbPath}`);
+  console.log(`Size:     ${formatBytes(indexSize)}`);
+  console.log(`Provider: ${provider === "local" ? `${c.dim}local${c.reset}` : `${c.cyan}${provider}${c.reset}`} ${c.dim}(embed: ${embedModel}, rerank: ${rerankModel})${c.reset}\n`);
 
   console.log(`${c.bold}Documents${c.reset}`);
   console.log(`  Total:    ${totalDocs.count} files indexed`);
@@ -2371,10 +2379,22 @@ function showHelp(): void {
   console.log("  --max-bytes <num>          - Skip files larger than N bytes (default: 10240)");
   console.log("  --json/--csv/--md/--xml/--files - Output format (same as search)");
   console.log("");
-  console.log("Models (auto-downloaded from HuggingFace):");
-  console.log("  Embedding: embeddinggemma-300M-Q8_0");
-  console.log("  Reranking: qwen3-reranker-0.6b-q8_0");
-  console.log("  Generation: Qwen3-0.6B-Q8_0");
+  // Show current provider and models
+  const llm = getDefaultLLM();
+  const provider = llm.getProvider();
+  // Shorten model names for display (strip HuggingFace URI prefix)
+  const embedModelShort = llm.getEmbedModel().replace(/^hf:[^/]+\/[^/]+\//, "");
+  const rerankModelShort = llm.getRerankModel().replace(/^hf:[^/]+\/[^/]+\//, "");
+  if (provider === "local") {
+    console.log("Models (auto-downloaded from HuggingFace):");
+    console.log(`  Embedding: ${embedModelShort}`);
+    console.log(`  Reranking: ${rerankModelShort}`);
+    console.log("  Generation: Qwen3-0.6B-Q8_0");
+  } else {
+    console.log(`Provider: ${provider} (set via QMD_PROVIDER)`);
+    console.log(`  Embedding: ${embedModelShort}`);
+    console.log(`  Reranking: ${rerankModelShort}`);
+  }
   console.log("");
   console.log(`Index: ${getDbPath()}`);
 }
