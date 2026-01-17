@@ -1465,9 +1465,13 @@ function renderProgressBar(percent: number, width: number = 30): string {
   return bar;
 }
 
-async function vectorIndex(model: string = DEFAULT_EMBED_MODEL, force: boolean = false): Promise<void> {
+async function vectorIndex(force: boolean = false): Promise<void> {
   const db = getDb();
   const now = new Date().toISOString();
+
+  // Get the LLM provider early to determine the model name
+  const llm = getDefaultLLM();
+  const model = llm.getEmbedModel();
 
   // If force, clear all vectors
   if (force) {
@@ -1533,11 +1537,9 @@ async function vectorIndex(model: string = DEFAULT_EMBED_MODEL, force: boolean =
   console.log(`${c.dim}Model: ${model}${c.reset}\n`);
 
   // Hide cursor during embedding
-  cursor.hide();
 
   // Get embedding dimensions from first chunk
   progress.indeterminate();
-  const llm = getDefaultLLM();
   const firstChunk = allChunks[0];
   if (!firstChunk) {
     throw new Error("No chunks available to embed");
@@ -2555,7 +2557,7 @@ if (import.meta.main) {
       break;
 
     case "embed":
-      await vectorIndex(DEFAULT_EMBED_MODEL, !!cli.values.force);
+      await vectorIndex(!!cli.values.force);
       break;
 
     case "search":

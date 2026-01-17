@@ -169,6 +169,11 @@ export interface LLM {
   embed(text: string, options?: EmbedOptions): Promise<EmbeddingResult | null>;
 
   /**
+   * Get embeddings for multiple texts in a batch
+   */
+  embedBatch(texts: string[], options?: EmbedOptions): Promise<(EmbeddingResult | null)[]>;
+
+  /**
    * Generate text completion
    */
   generate(prompt: string, options?: GenerateOptions): Promise<GenerateResult | null>;
@@ -189,6 +194,11 @@ export interface LLM {
    * Returns list of documents with relevance scores (higher = more relevant)
    */
   rerank(query: string, documents: RerankDocument[], options?: RerankOptions): Promise<RerankResult>;
+
+  /**
+   * Get the name of the embedding model being used
+   */
+  getEmbedModel(): string;
 
   /**
    * Dispose of resources
@@ -749,6 +759,10 @@ Final Output:`;
       results,
       model: this.rerankModelUri,
     };
+  }
+
+  getEmbedModel(): string {
+    return this.embedModelUri;
   }
 
   async dispose(): Promise<void> {

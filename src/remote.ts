@@ -192,7 +192,7 @@ export class RemoteLLM implements LLM {
 
       const response = await this.request<EmbedResponse>("/embeddings", body);
 
-      if (!response.data || response.data.length === 0) {
+      if (!response.data || response.data.length === 0 || !response.data[0]) {
         return null;
       }
 
@@ -326,7 +326,7 @@ export class RemoteLLM implements LLM {
       } satisfies RerankRequest);
 
       const results: RerankDocumentResult[] = response.data.map((item) => ({
-        file: documents[item.index].file,
+        file: documents[item.index]?.file ?? "",
         score: item.relevance_score,
         index: item.index,
       }));
@@ -348,6 +348,13 @@ export class RemoteLLM implements LLM {
         model: this.rerankModel,
       };
     }
+  }
+
+  /**
+   * Get the name of the embedding model being used
+   */
+  getEmbedModel(): string {
+    return this.embedModel;
   }
 
   /**
