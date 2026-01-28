@@ -2384,6 +2384,18 @@ function showHelp(): void {
   console.log("  qmd query <query>             - Combined search with query expansion + reranking");
   console.log("  qmd mcp                       - Start MCP server (for AI agent integration)");
   console.log("");
+  console.log("Graph commands (knowledge graph):");
+  console.log("  qmd graph entity add <type> <name>  - Create entity (person, company, topic, etc.)");
+  console.log("  qmd graph entity get <id>           - Get entity details");
+  console.log("  qmd graph entity list [--type <t>]  - List entities");
+  console.log("  qmd graph entity search <query>     - FTS search on entity names");
+  console.log("  qmd graph entity rm <id>            - Delete entity");
+  console.log("  qmd graph edge add <src> <rel> <tgt> - Create relationship");
+  console.log("  qmd graph edge list <entity>        - List entity's relationships");
+  console.log("  qmd graph traverse <id> [--depth N] - Multi-hop traversal");
+  console.log("  qmd graph path <from> <to>          - Find shortest path between entities");
+  console.log("  qmd graph stats                     - Entity/edge counts by type");
+  console.log("");
   console.log("Global options:");
   console.log("  --index <name>             - Use custom index name (default: index)");
   console.log("");
