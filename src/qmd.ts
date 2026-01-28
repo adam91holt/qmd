@@ -64,6 +64,7 @@ import {
   DEFAULT_MULTI_GET_MAX_BYTES,
   createStore,
   getDefaultDbPath,
+  getProviderInfo,
 } from "./store.js";
 import { getDefaultLlamaCpp, disposeDefaultLlamaCpp, type RerankDocument, type Queryable, type QueryType } from "./llm.js";
 import type { SearchResult, RankedResult } from "./store.js";
@@ -295,9 +296,13 @@ function showStatus(): void {
   // Most recent update across all collections
   const mostRecent = db.prepare(`SELECT MAX(modified_at) as latest FROM documents WHERE active = 1`).get() as { latest: string | null };
 
+  // Provider info
+  const providerInfo = getProviderInfo();
+
   console.log(`${c.bold}QMD Status${c.reset}\n`);
   console.log(`Index: ${dbPath}`);
-  console.log(`Size:  ${formatBytes(indexSize)}\n`);
+  console.log(`Size:  ${formatBytes(indexSize)}`);
+  console.log(`Provider: ${c.cyan}${providerInfo.provider}${c.reset} (${providerInfo.embedModel})\n`);
 
   console.log(`${c.bold}Documents${c.reset}`);
   console.log(`  Total:    ${totalDocs.count} files indexed`);
